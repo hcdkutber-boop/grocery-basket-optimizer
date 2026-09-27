@@ -34,6 +34,7 @@ def product_from_api(raw: dict[str, Any], *, store_id: str) -> StoreProduct:
     if stock_limit is not None and stock_limit <= 0:
         in_stock = False
 
+    clarification = raw.get("property_clarification")
     return StoreProduct(
         provider="pyaterochka",
         store_id=str(store_id),
@@ -41,8 +42,8 @@ def product_from_api(raw: dict[str, Any], *, store_id: str) -> StoreProduct:
         name=str(raw.get("name") or ""),
         price=price,
         regular_price=regular,
-        size=(\n            str(raw.get("property_clarification"))\n            if raw.get("property_clarification")\n            else None\n        ),
-        unit=(str(raw.get("uom")) if raw.get("uom") else None),
+        size=str(clarification) if clarification else None,
+        unit=str(raw.get("uom")) if raw.get("uom") else None,
         in_stock=in_stock,
         stock_limit=stock_limit,
         rating=_decimal(rating_data.get("rating_average")),
