@@ -14,6 +14,7 @@ dependencies = []
 pyaterochka = [
   "pyaterochka_api @ git+https://github.com/Open-Inflation/pyaterochka_api.git@237658a2efe4cc62b020cc9479f9913f485d8813",
   "pyaterochka-mcp @ git+https://github.com/shi-kirill/pyaterochka-mcp.git@91a5db429966289b0c1409d65113dc703e1d31cf",
+  "pytest>=8,<10",
 ]
 dev = [
   "pytest>=8,<10",
