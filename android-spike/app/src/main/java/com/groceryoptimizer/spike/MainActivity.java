@@ -28,6 +28,7 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -109,7 +110,7 @@ public class MainActivity extends Activity {
         root.addView(webView, webParams);
 
         setContentView(root);
-        appendLog("APK 0.2-mobile-spike. Нативный поиск; корзина и checkout отключены.");
+        appendLog("APK 0.3-mobile-spike. Нативный поиск; корзина и checkout отключены.");
         webView.loadUrl(HOME_URL);
     }
 
@@ -255,11 +256,24 @@ public class MainActivity extends Activity {
                 + "/search?mode=delivery&include_restrict=true&q="
                 + Uri.encode(query) + "&limit=10";
 
+        // All WebView access must happen on the main thread. Snapshot the
+        // browser/session data here and pass only plain values to the worker.
+        String userAgent = webView.getSettings().getUserAgentString();
+        String cookie = CookieManager.getInstance().getCookie(API_ORIGIN + "/");
+        Map<String, String> headersSnapshot = new HashMap<>(capturedHeaders);
+
         appendLog("Нативный поиск: «" + query + "»…");
-        new Thread(() -> runNativeSearch(endpoint)).start();
+        new Thread(
+                () -> runNativeSearch(endpoint, userAgent, cookie, headersSnapshot)
+        ).start();
     }
 
-    private void runNativeSearch(String endpoint) {
+    private void runNativeSearch(
+            String endpoint,
+            String userAgent,
+            String cookie,
+            Map<String, String> headersSnapshot
+    ) {
         HttpURLConnection connection = null;
         try {
             URL url = new URL(endpoint);
@@ -276,17 +290,15 @@ public class MainActivity extends Activity {
             connection.setRequestProperty("Accept", "application/json, text/plain, */*");
             connection.setRequestProperty("Referer", HOME_URL);
             connection.setRequestProperty("Origin", "https://5ka.ru");
-            connection.setRequestProperty(
-                    "User-Agent",
-                    webView.getSettings().getUserAgentString()
-            );
+            if (userAgent != null && !userAgent.isBlank()) {
+                connection.setRequestProperty("User-Agent", userAgent);
+            }
 
-            String cookie = CookieManager.getInstance().getCookie(API_ORIGIN + "/");
             if (cookie != null && !cookie.isBlank()) {
                 connection.setRequestProperty("Cookie", cookie);
             }
 
-            for (Map.Entry<String, String> entry : capturedHeaders.entrySet()) {
+            for (Map.Entry<String, String> entry : headersSnapshot.entrySet()) {
                 connection.setRequestProperty(entry.getKey(), entry.getValue());
             }
 
