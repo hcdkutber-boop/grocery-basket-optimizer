@@ -25,7 +25,8 @@ async def main() -> None:
     try:
         from pyaterochka_api import PyaterochkaAPI
     except ImportError as exc:
-        raise SystemExit(\n            'Install live dependencies first: pip install -e ".[pyaterochka]"'\n        ) from exc
+        message = 'Install live dependencies first: pip install -e ".[pyaterochka]"'
+        raise SystemExit(message) from exc
 
     from grocery_optimizer.providers.pyaterochka.catalog import PyaterochkaCatalog
 
@@ -33,11 +34,16 @@ async def main() -> None:
         store_id = args.store_id
         if not store_id:
             store_info = await api.delivery_panel_store()
-            selected = store_info.get("selectedStore", {}) if isinstance(store_info, dict) else {}
+            selected = (
+                store_info.get("selectedStore", {})
+                if isinstance(store_info, dict)
+                else {}
+            )
             store_id = selected.get("sapCode")
         if not store_id:
             raise SystemExit(
-                "No store id available. Select a delivery store on 5ka.ru or pass --store-id."
+                "No store id available. Select a delivery store on 5ka.ru "
+                "or pass --store-id."
             )
 
         catalog = PyaterochkaCatalog(api, store_id=str(store_id))
@@ -49,7 +55,8 @@ async def main() -> None:
             stock = "in stock" if product.in_stock else "out of stock"
             regular = (
                 f" (regular {product.regular_price} RUB)"
-                if product.regular_price is not None and product.regular_price != product.price
+                if product.regular_price is not None
+                and product.regular_price != product.price
                 else ""
             )
             print(
@@ -58,14 +65,16 @@ async def main() -> None:
             )
 
     if not args.add_product_id:
-        print("\nRead-only catalogue test completed. Cart was not changed.")
+        print()
+        print("Read-only catalogue test completed. Cart was not changed.")
         return
 
     try:
         from pyaterochka_mcp.client import PyaterochkaClient
         from pyaterochka_mcp.config import load_config
     except ImportError as exc:
-        raise SystemExit('Cart driver missing. Install: pip install -e ".[pyaterochka]"') from exc
+        message = 'Cart driver missing. Install: pip install -e ".[pyaterochka]"'
+        raise SystemExit(message) from exc
 
     from grocery_optimizer.providers.pyaterochka.cart import PyaterochkaCart
 
@@ -74,12 +83,15 @@ async def main() -> None:
     async with PyaterochkaClient(config) as client:
         cart_driver = PyaterochkaCart(client)
         before = await cart_driver.get()
-        print(f"\nCart before: {before.total_cost} RUB, {before.total_quantity} items")
+        print()
+        print(f"Cart before: {before.total_cost} RUB, {before.total_quantity} items")
 
         after = await cart_driver.add(args.add_product_id, args.quantity)
         print(f"Cart after:  {after.total_cost} RUB, {after.total_quantity} items")
 
-        matching = [item for item in after.items if item.product_id == str(args.add_product_id)]
+        matching = [
+            item for item in after.items if item.product_id == str(args.add_product_id)
+        ]
         if not matching:
             raise SystemExit("Cart write did not verify: product is absent after reread.")
 
