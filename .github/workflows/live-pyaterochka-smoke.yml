@@ -5,6 +5,7 @@ on:
     paths:
       - "scripts/smoke_pyaterochka_public.py"
       - ".github/workflows/live-pyaterochka-smoke.yml"
+      - "pyproject.toml"
   workflow_dispatch:
     inputs:
       query:
