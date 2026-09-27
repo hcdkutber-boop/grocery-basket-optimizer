@@ -25,7 +25,7 @@ async def main() -> None:
     try:
         from pyaterochka_api import PyaterochkaAPI
     except ImportError as exc:
-        raise SystemExit('Install live dependencies first: pip install -e ".[pyaterochka]"') from exc
+        raise SystemExit(\n            'Install live dependencies first: pip install -e ".[pyaterochka]"'\n        ) from exc
 
     from grocery_optimizer.providers.pyaterochka.catalog import PyaterochkaCatalog
 
