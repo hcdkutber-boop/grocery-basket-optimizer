@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
+import android.content.SharedPreferences;
 import android.text.InputType;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
@@ -49,10 +50,14 @@ public class MainActivity extends Activity {
     private String selectedProductId = "";
     private String selectedProductUom = "";
     private String selectedProductName = "";
+    private SharedPreferences preferences;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        preferences = getSharedPreferences("grocery_spike", MODE_PRIVATE);
+        storeId = preferences.getString("store_id", "");
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -60,7 +65,11 @@ public class MainActivity extends Activity {
         root.setPadding(pad, pad, pad, pad);
 
         statusView = new TextView(this);
-        statusView.setText("Статус: откройте Пятёрочку и войдите в X5 ID");
+        statusView.setText(
+                storeId.isBlank()
+                        ? "Статус: сессия не открывается автоматически"
+                        : "Магазин: " + storeId + " (сохранён)"
+        );
         statusView.setTextSize(16f);
         root.addView(statusView, matchWrap());
 
@@ -69,7 +78,10 @@ public class MainActivity extends Activity {
 
         Button openButton = new Button(this);
         openButton.setText("Открыть Пятёрочку");
-        openButton.setOnClickListener(v -> webView.loadUrl(HOME_URL));
+        openButton.setOnClickListener(v -> {
+            appendLog("Открываем 5ka.ru вручную. Если появился антибот — не повторяйте попытки.");
+            webView.loadUrl(HOME_URL);
+        });
         actionRow.addView(openButton, weightWrap());
 
         Button storeButton = new Button(this);
@@ -127,8 +139,8 @@ public class MainActivity extends Activity {
         configureApiWebView();
 
         setContentView(root);
-        appendLog("APK 0.6-mobile-spike. Тест добавления 1 SKU; checkout отключён.");
-        webView.loadUrl(HOME_URL);
+        appendLog("APK 0.7-mobile-spike. Щадящий режим X5; автооткрытие сайта отключено.");
+        appendLog("Сначала пробуйте поиск/корзину с сохранённой сессией. Пятёрочку открывайте только при необходимости.");
     }
 
     private void configureWebView() {
@@ -175,7 +187,7 @@ public class MainActivity extends Activity {
                 String host = uri.getHost();
                 statusView.setText("Страница: " + (host == null ? url : host));
                 if (host != null && host.endsWith("5ka.ru")) {
-                    appendLog("5ka.ru загружена. После входа выберите адрес/магазин на сайте.");
+                    appendLog("5ka.ru загружена. Если видите антибот — закройте сайт и повторите позже.");
                 }
             }
         });
@@ -287,6 +299,7 @@ public class MainActivity extends Activity {
                 }
 
                 storeId = id;
+                preferences.edit().putString("store_id", storeId).apply();
                 String name = selected.optString("name", "");
                 statusView.setText("Магазин: " + storeId + (name.isBlank() ? "" : " — " + name));
                 appendLog("Магазин определён: " + storeId);
@@ -321,7 +334,10 @@ public class MainActivity extends Activity {
         requestHeaders.put("Referer", HOME_URL);
 
         pendingApiAction = "search";
-        appendLog("Браузерный поиск: «" + query + "»…");
+        appendLog(
+                "Браузерный поиск: «" + query + "»; служебных заголовков в памяти: "
+                        + capturedHeaders.size()
+        );
         apiWebView.loadUrl(endpoint, requestHeaders);
     }
 
