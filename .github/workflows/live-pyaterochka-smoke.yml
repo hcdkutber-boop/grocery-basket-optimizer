@@ -1,0 +1,37 @@
+name: Live Pyaterochka read-only smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      query:
+        description: Product search query
+        required: false
+        default: "молоко"
+      longitude:
+        description: Public test longitude
+        required: false
+        default: "37.6176"
+      latitude:
+        description: Public test latitude
+        required: false
+        default: "55.7558"
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install live dependencies
+        run: |
+          pip install -e ".[pyaterochka]"
+          python -m camoufox fetch
+      - name: Run public catalogue smoke
+        env:
+          QUERY: ${{ inputs.query }}
+          LONGITUDE: ${{ inputs.longitude }}
+          LATITUDE: ${{ inputs.latitude }}
+        run: python scripts/smoke_pyaterochka_public.py
