@@ -21,13 +21,21 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class MainActivity extends Activity {
     private static final String HOME_URL = "https://5ka.ru/";
+    private static final String API_ORIGIN = "https://5d.5ka.ru";
     private static final String SEARCH_BASE =
-            "https://5d.5ka.ru/api/catalog/v3/stores/";
+            API_ORIGIN + "/api/catalog/v3/stores/";
 
     private final Map<String, String> capturedHeaders = new ConcurrentHashMap<>();
 
@@ -101,7 +109,7 @@ public class MainActivity extends Activity {
         root.addView(webView, webParams);
 
         setContentView(root);
-        appendLog("APK 0.1-mobile-spike. Корзина и checkout отключены.");
+        appendLog("APK 0.2-mobile-spike. Нативный поиск; корзина и checkout отключены.");
         webView.loadUrl(HOME_URL);
     }
 
@@ -222,6 +230,9 @@ public class MainActivity extends Activity {
                 statusView.setText("Магазин: " + storeId + (name.isBlank() ? "" : " — " + name));
                 appendLog("Магазин определён: " + storeId);
                 appendLog("Захвачено служебных заголовков X5: " + capturedHeaders.size());
+
+                String cookie = CookieManager.getInstance().getCookie(API_ORIGIN + "/");
+                appendLog("Cookies для API: " + (cookie == null || cookie.isBlank() ? "нет" : "есть"));
             } catch (JSONException error) {
                 appendLog("Не удалось разобрать DeliveryPanelStore: " + error.getMessage());
             }
@@ -233,10 +244,6 @@ public class MainActivity extends Activity {
             appendLog("Сначала нажмите «Определить магазин».");
             return;
         }
-        if (!isOnFiveka()) {
-            appendLog("Поиск выполняется только со страницы 5ka.ru.");
-            return;
-        }
 
         String query = queryView.getText().toString().trim();
         if (query.isBlank()) {
@@ -244,57 +251,105 @@ public class MainActivity extends Activity {
             return;
         }
 
-        JSONObject headersJson = new JSONObject();
-        try {
-            for (Map.Entry<String, String> entry : capturedHeaders.entrySet()) {
-                headersJson.put(entry.getKey(), entry.getValue());
-            }
-            headersJson.put("Accept", "application/json, text/plain, */*");
-        } catch (JSONException ignored) {
-        }
-
         String endpoint = SEARCH_BASE + Uri.encode(storeId)
                 + "/search?mode=delivery&include_restrict=true&q="
                 + Uri.encode(query) + "&limit=10";
 
-        String js = "(async()=>{try{"
-                + "const r=await fetch(" + JSONObject.quote(endpoint) + ",{"
-                + "method:'GET',credentials:'include',headers:" + headersJson + "});"
-                + "const body=await r.text();"
-                + "return JSON.stringify({ok:r.ok,status:r.status,body:body});"
-                + "}catch(e){return JSON.stringify({ok:false,status:0,error:String(e)});}})()";
-
-        appendLog("Поиск: «" + query + "»…");
-        webView.evaluateJavascript(js, value -> handleSearchResult(value));
+        appendLog("Нативный поиск: «" + query + "»…");
+        new Thread(() -> runNativeSearch(endpoint)).start();
     }
 
-    private void handleSearchResult(String javascriptValue) {
-        String decoded = decodeJavascriptString(javascriptValue);
-        if (decoded == null) {
-            appendLog("Пустой ответ JavaScript.");
+    private void runNativeSearch(String endpoint) {
+        HttpURLConnection connection = null;
+        try {
+            URL url = new URL(endpoint);
+            if (!"https".equalsIgnoreCase(url.getProtocol())
+                    || !"5d.5ka.ru".equalsIgnoreCase(url.getHost())) {
+                throw new IOException("Blocked API host");
+            }
+
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(20000);
+            connection.setInstanceFollowRedirects(false);
+            connection.setRequestProperty("Accept", "application/json, text/plain, */*");
+            connection.setRequestProperty("Referer", HOME_URL);
+            connection.setRequestProperty("Origin", "https://5ka.ru");
+            connection.setRequestProperty(
+                    "User-Agent",
+                    webView.getSettings().getUserAgentString()
+            );
+
+            String cookie = CookieManager.getInstance().getCookie(API_ORIGIN + "/");
+            if (cookie != null && !cookie.isBlank()) {
+                connection.setRequestProperty("Cookie", cookie);
+            }
+
+            for (Map.Entry<String, String> entry : capturedHeaders.entrySet()) {
+                connection.setRequestProperty(entry.getKey(), entry.getValue());
+            }
+
+            int status = connection.getResponseCode();
+            InputStream stream = status >= 400
+                    ? connection.getErrorStream()
+                    : connection.getInputStream();
+            String body = readStream(stream);
+
+            int finalStatus = status;
+            String finalBody = body;
+            runOnUiThread(() -> handleNativeSearchResult(finalStatus, finalBody));
+        } catch (Exception error) {
+            String message = error.getClass().getSimpleName() + ": " + error.getMessage();
+            runOnUiThread(() -> appendLog("Нативный запрос не выполнен: " + message));
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
+    private String readStream(InputStream stream) throws IOException {
+        if (stream == null) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                builder.append(line);
+                if (builder.length() > 2_000_000) {
+                    throw new IOException("Response too large");
+                }
+            }
+        }
+        return builder.toString();
+    }
+
+    private void handleNativeSearchResult(int status, String body) {
+        appendLog("HTTP " + status);
+
+        if (status < 200 || status >= 300) {
+            String preview = body == null ? "" : body.trim();
+            if (preview.length() > 300) {
+                preview = preview.substring(0, 300);
+            }
+            if (!preview.isBlank()) {
+                appendLog("Ответ: " + preview);
+            }
             return;
         }
 
         try {
-            JSONObject envelope = new JSONObject(decoded);
-            int status = envelope.optInt("status", 0);
-            if (!envelope.optBoolean("ok", false)) {
-                appendLog("API не пропустил запрос. HTTP " + status);
-                String error = envelope.optString("error", "");
-                if (!error.isBlank()) {
-                    appendLog("Ошибка: " + error);
-                }
-                return;
-            }
-
-            JSONObject payload = new JSONObject(envelope.optString("body", "{}"));
+            JSONObject payload = new JSONObject(body == null ? "{}" : body);
             JSONArray products = payload.optJSONArray("products");
             if (products == null) {
                 appendLog("HTTP " + status + ", но поле products не найдено.");
                 return;
             }
 
-            appendLog("HTTP " + status + ". Найдено товаров: " + products.length());
+            appendLog("Найдено товаров: " + products.length());
             int shown = Math.min(products.length(), 10);
             for (int i = 0; i < shown; i++) {
                 JSONObject product = products.optJSONObject(i);
