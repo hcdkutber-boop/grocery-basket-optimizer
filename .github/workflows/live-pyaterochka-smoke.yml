@@ -1,6 +1,10 @@
 name: Live Pyaterochka read-only smoke
 
 on:
+  push:
+    paths:
+      - "scripts/smoke_pyaterochka_public.py"
+      - ".github/workflows/live-pyaterochka-smoke.yml"
   workflow_dispatch:
     inputs:
       query:
