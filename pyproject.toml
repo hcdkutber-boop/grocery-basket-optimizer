@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "grocery-basket-optimizer"
+version = "0.1.0"
+description = "Grocery price comparison and shopping cart optimizer."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+pyaterochka = [
+  "pyaterochka_api @ git+https://github.com/Open-Inflation/pyaterochka_api.git@237658a2efe4cc62b020cc9479f9913f485d8813",
+  "pyaterochka-mcp @ git+https://github.com/shi-kirill/pyaterochka-mcp.git@91a5db429966289b0c1409d65113dc703e1d31cf",
+]
+dev = [
+  "pytest>=8,<10",
+  "pytest-asyncio>=0.23,<2",
+  "ruff>=0.12,<1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/grocery_optimizer"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
