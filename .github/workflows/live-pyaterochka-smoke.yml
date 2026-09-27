@@ -35,7 +35,7 @@ jobs:
           python -m camoufox fetch
       - name: Run public catalogue smoke
         env:
-          QUERY: ${{ inputs.query }}
-          LONGITUDE: ${{ inputs.longitude }}
-          LATITUDE: ${{ inputs.latitude }}
+          QUERY: ${{ inputs.query || 'молоко' }}
+          LONGITUDE: ${{ inputs.longitude || '37.6176' }}
+          LATITUDE: ${{ inputs.latitude || '55.7558' }}
         run: python scripts/smoke_pyaterochka_public.py
