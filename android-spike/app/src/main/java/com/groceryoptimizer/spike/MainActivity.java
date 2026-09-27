@@ -44,6 +44,11 @@ public class MainActivity extends Activity {
     private EditText queryView;
     private String storeId;
     private String pendingApiAction = "";
+    private String currentCartId = "";
+    private int currentCartItemCount = -1;
+    private String selectedProductId = "";
+    private String selectedProductUom = "";
+    private String selectedProductName = "";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -96,6 +101,11 @@ public class MainActivity extends Activity {
         cartButton.setOnClickListener(v -> readCart());
         root.addView(cartButton, matchWrap());
 
+        Button addButton = new Button(this);
+        addButton.setText("Добавить первый найденный товар — 1 шт.");
+        addButton.setOnClickListener(v -> addSelectedProduct());
+        root.addView(addButton, matchWrap());
+
         logView = new TextView(this);
         logView.setTextSize(13f);
         logView.setTextColor(Color.DKGRAY);
@@ -117,7 +127,7 @@ public class MainActivity extends Activity {
         configureApiWebView();
 
         setContentView(root);
-        appendLog("APK 0.5-mobile-spike. Каталог + чтение корзины; запись отключена.");
+        appendLog("APK 0.6-mobile-spike. Тест добавления 1 SKU; checkout отключён.");
         webView.loadUrl(HOME_URL);
     }
 
@@ -331,6 +341,10 @@ public class MainActivity extends Activity {
             handleCartGetBody(trimmed);
             return;
         }
+        if ("cart_add".equals(pendingApiAction)) {
+            handleCartAddBody(trimmed);
+            return;
+        }
 
         try {
             JSONObject payload = new JSONObject(trimmed);
@@ -343,6 +357,28 @@ public class MainActivity extends Activity {
             }
 
             appendLog("JSON получен. Найдено товаров: " + products.length());
+
+            if (products.length() > 0) {
+                JSONObject first = products.optJSONObject(0);
+                if (first != null) {
+                    selectedProductId = firstNonBlank(
+                            first.optString("plu", ""),
+                            first.optString("id", "")
+                    );
+                    selectedProductUom = firstNonBlank(
+                            first.optString("uom", ""),
+                            first.optString("unit", "")
+                    );
+                    selectedProductName = first.optString("name", "Без названия");
+                    if (!selectedProductId.isBlank()) {
+                        appendLog(
+                                "Выбран для теста первый SKU: ["
+                                        + selectedProductId + "] " + selectedProductName
+                        );
+                    }
+                }
+            }
+
             int shown = Math.min(products.length(), 10);
             for (int i = 0; i < shown; i++) {
                 JSONObject product = products.optJSONObject(i);
@@ -432,6 +468,7 @@ public class MainActivity extends Activity {
                 return;
             }
 
+            currentCartId = cartId;
             appendLog("Найдена корзина: " + cartId);
 
             Map<String, String> requestHeaders = new HashMap<>(capturedHeaders);
@@ -495,6 +532,7 @@ public class MainActivity extends Activity {
             }
 
             int itemCount = items == null ? 0 : items.length();
+            currentCartItemCount = itemCount;
             appendLog(
                     "Корзина прочитана. Позиций: " + itemCount
                             + (Double.isNaN(total) ? "" : "; итог: " + total + " ₽")
@@ -545,6 +583,119 @@ public class MainActivity extends Activity {
             appendLog("Не удалось разобрать корзину: " + error.getMessage());
             appendLog("Ответ: " + body.substring(0, Math.min(body.length(), 300)));
         }
+    }
+
+    private void addSelectedProduct() {
+        if (selectedProductId.isBlank()) {
+            appendLog("Сначала выполните поиск товара.");
+            return;
+        }
+        if (currentCartId.isBlank() || currentCartItemCount < 0) {
+            appendLog("Сначала нажмите «Прочитать корзину».");
+            return;
+        }
+        if (currentCartItemCount != 0) {
+            appendLog(
+                    "Тестовая запись разрешена только для пустой корзины, "
+                            + "чтобы случайно не изменить существующий заказ."
+            );
+            return;
+        }
+        if (selectedProductUom.isBlank()) {
+            appendLog("У выбранного SKU не найден uom; тест записи отменён.");
+            return;
+        }
+
+        String endpoint = API_ORIGIN + "/api/orders/v8/orders/"
+                + Uri.encode(currentCartId) + "/item/";
+
+        JSONObject body = new JSONObject();
+        try {
+            body.put("plu", selectedProductId);
+            body.put("qty", 1);
+            body.put("uom", selectedProductUom);
+        } catch (JSONException error) {
+            appendLog("Не удалось собрать тело запроса: " + error.getMessage());
+            return;
+        }
+
+        JSONObject headers = new JSONObject();
+        try {
+            headers.put("Content-Type", "application/json");
+            headers.put("Accept", "application/json, text/plain, */*");
+            for (Map.Entry<String, String> entry : capturedHeaders.entrySet()) {
+                headers.put(entry.getKey(), entry.getValue());
+            }
+        } catch (JSONException ignored) {
+        }
+
+        String js = "(async()=>{try{"
+                + "const r=await fetch(" + JSONObject.quote(endpoint) + ",{"
+                + "method:'POST',credentials:'include',"
+                + "headers:" + headers + ","
+                + "body:" + JSONObject.quote(body.toString())
+                + "});"
+                + "const t=await r.text();"
+                + "return JSON.stringify({status:r.status,ok:r.ok,body:t});"
+                + "}catch(e){return JSON.stringify({status:0,ok:false,error:String(e)});}})()";
+
+        pendingApiAction = "cart_add";
+        appendLog(
+                "Добавление 1 шт.: [" + selectedProductId + "] "
+                        + selectedProductName + "…"
+        );
+
+        // apiWebView is already on 5d.5ka.ru after catalogue/cart reads,
+        // so this fetch is same-origin and uses the accepted browser network stack.
+        apiWebView.evaluateJavascript(js, value -> {
+            String decoded = decodeJavascriptString(value);
+            if (decoded == null) {
+                appendLog("Пустой ответ операции добавления. Запись не повторяем.");
+                readCart();
+                return;
+            }
+            handleCartAddEnvelope(decoded);
+        });
+    }
+
+    private void handleCartAddEnvelope(String decoded) {
+        try {
+            JSONObject envelope = new JSONObject(decoded);
+            int status = envelope.optInt("status", 0);
+            boolean ok = envelope.optBoolean("ok", false);
+            appendLog("POST cart_add: HTTP " + status);
+
+            if (!ok) {
+                String error = envelope.optString("error", "");
+                if (!error.isBlank()) {
+                    appendLog("Ошибка: " + error);
+                }
+                String responseBody = envelope.optString("body", "");
+                if (!responseBody.isBlank()) {
+                    appendLog(
+                            "Ответ: "
+                                    + responseBody.substring(
+                                            0, Math.min(responseBody.length(), 240)
+                                    )
+                    );
+                }
+                appendLog("Запись не повторяем. Проверяем фактическую корзину.");
+                readCart();
+                return;
+            }
+
+            String responseBody = envelope.optString("body", "");
+            handleCartAddBody(responseBody);
+        } catch (JSONException error) {
+            appendLog("Не удалось разобрать ответ POST: " + error.getMessage());
+            appendLog("Запись не повторяем. Проверяем корзину.");
+            readCart();
+        }
+    }
+
+    private void handleCartAddBody(String body) {
+        appendLog("X5 принял запрос добавления. Перечитываем корзину для проверки.");
+        readCart();
     }
 
     private JSONArray firstArray(JSONArray... values) {
