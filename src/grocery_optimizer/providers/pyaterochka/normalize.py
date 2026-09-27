@@ -41,7 +41,7 @@ def product_from_api(raw: dict[str, Any], *, store_id: str) -> StoreProduct:
         name=str(raw.get("name") or ""),
         price=price,
         regular_price=regular,
-        size=(str(raw.get("property_clarification")) if raw.get("property_clarification") else None),
+        size=(\n            str(raw.get("property_clarification"))\n            if raw.get("property_clarification")\n            else None\n        ),
         unit=(str(raw.get("uom")) if raw.get("uom") else None),
         in_stock=in_stock,
         stock_limit=stock_limit,
