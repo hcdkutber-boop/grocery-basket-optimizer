@@ -30,6 +30,10 @@ public class MainActivity extends Activity {
     private static final String API_ORIGIN = "https://5d.5ka.ru";
     private static final String SEARCH_BASE =
             API_ORIGIN + "/api/catalog/v3/stores/";
+    private static final String CART_LIST_URL =
+            API_ORIGIN + "/api/orders/v3/orders/?in_action=true";
+    private static final String CART_GET_BASE =
+            API_ORIGIN + "/api/orders/v10/orders/";
 
     private final Map<String, String> capturedHeaders = new ConcurrentHashMap<>();
 
@@ -39,6 +43,7 @@ public class MainActivity extends Activity {
     private TextView logView;
     private EditText queryView;
     private String storeId;
+    private String pendingApiAction = "";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -86,6 +91,11 @@ public class MainActivity extends Activity {
 
         root.addView(searchRow, matchWrap());
 
+        Button cartButton = new Button(this);
+        cartButton.setText("Прочитать корзину");
+        cartButton.setOnClickListener(v -> readCart());
+        root.addView(cartButton, matchWrap());
+
         logView = new TextView(this);
         logView.setTextSize(13f);
         logView.setTextColor(Color.DKGRAY);
@@ -107,7 +117,7 @@ public class MainActivity extends Activity {
         configureApiWebView();
 
         setContentView(root);
-        appendLog("APK 0.4-mobile-spike. Поиск через браузерный транспорт; корзина отключена.");
+        appendLog("APK 0.5-mobile-spike. Каталог + чтение корзины; запись отключена.");
         webView.loadUrl(HOME_URL);
     }
 
@@ -198,7 +208,7 @@ public class MainActivity extends Activity {
                         appendLog("Браузерный API-транспорт вернул пустой ответ.");
                         return;
                     }
-                    handleBrowserApiBody(decoded);
+                    handleApiBody(decoded);
                 });
             }
         });
@@ -300,15 +310,25 @@ public class MainActivity extends Activity {
         requestHeaders.put("Accept", "application/json, text/plain, */*");
         requestHeaders.put("Referer", HOME_URL);
 
+        pendingApiAction = "search";
         appendLog("Браузерный поиск: «" + query + "»…");
         apiWebView.loadUrl(endpoint, requestHeaders);
     }
 
-    private void handleBrowserApiBody(String body) {
+    private void handleApiBody(String body) {
         String trimmed = body.trim();
         if (trimmed.startsWith("<!DOCTYPE") || trimmed.startsWith("<html")) {
             appendLog("Браузерный API-транспорт получил HTML вместо JSON.");
             appendLog(trimmed.substring(0, Math.min(trimmed.length(), 240)));
+            return;
+        }
+
+        if ("cart_list".equals(pendingApiAction)) {
+            handleCartListBody(trimmed);
+            return;
+        }
+        if ("cart_get".equals(pendingApiAction)) {
+            handleCartGetBody(trimmed);
             return;
         }
 
@@ -347,6 +367,219 @@ public class MainActivity extends Activity {
             String preview = trimmed.substring(0, Math.min(trimmed.length(), 300));
             appendLog("Ответ: " + preview);
         }
+    }
+
+    private void readCart() {
+        Map<String, String> requestHeaders = new HashMap<>(capturedHeaders);
+        requestHeaders.put("Accept", "application/json, text/plain, */*");
+        requestHeaders.put("Referer", HOME_URL);
+
+        pendingApiAction = "cart_list";
+        appendLog("Чтение текущей корзины…");
+        apiWebView.loadUrl(CART_LIST_URL, requestHeaders);
+    }
+
+    private void handleCartListBody(String body) {
+        try {
+            JSONObject root = new JSONObject(body);
+            JSONObject data = root.optJSONObject("data");
+            if (data == null) {
+                data = root;
+            }
+
+            JSONArray items = data.optJSONArray("items");
+            String cartId = "";
+
+            if (items != null) {
+                for (int i = 0; i < items.length(); i++) {
+                    JSONObject item = items.optJSONObject(i);
+                    if (item == null) {
+                        continue;
+                    }
+
+                    Object status = item.opt("status");
+                    if (status == null || status == JSONObject.NULL) {
+                        status = item.opt("status_code");
+                    }
+
+                    String statusText = status == null || status == JSONObject.NULL
+                            ? ""
+                            : String.valueOf(status);
+                    if ("0".equals(statusText)
+                            || "CART".equalsIgnoreCase(statusText)) {
+                        cartId = firstNonBlank(
+                                item.optString("id", ""),
+                                item.optString("order_id", ""),
+                                item.optString("cart_id", "")
+                        );
+                        if (!cartId.isBlank()) {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (cartId.isBlank()) {
+                cartId = firstNonBlank(
+                        data.optString("id", ""),
+                        data.optString("order_id", ""),
+                        data.optString("cart_id", "")
+                );
+            }
+
+            if (cartId.isBlank()) {
+                appendLog("Открытая корзина не найдена.");
+                return;
+            }
+
+            appendLog("Найдена корзина: " + cartId);
+
+            Map<String, String> requestHeaders = new HashMap<>(capturedHeaders);
+            requestHeaders.put("Accept", "application/json, text/plain, */*");
+            requestHeaders.put("Referer", HOME_URL);
+
+            pendingApiAction = "cart_get";
+            apiWebView.loadUrl(
+                    CART_GET_BASE + Uri.encode(cartId) + "/",
+                    requestHeaders
+            );
+        } catch (JSONException error) {
+            appendLog("Не удалось разобрать список корзин: " + error.getMessage());
+            appendLog("Ответ: " + body.substring(0, Math.min(body.length(), 300)));
+        }
+    }
+
+    private void handleCartGetBody(String body) {
+        try {
+            JSONObject root = new JSONObject(body);
+            JSONObject data = root.optJSONObject("data");
+            if (data == null) {
+                data = root;
+            }
+
+            JSONObject cart = data.optJSONObject("cart");
+            if (cart == null) {
+                cart = data.optJSONObject("basket");
+            }
+            if (cart == null) {
+                cart = data;
+            }
+
+            JSONArray items = firstArray(
+                    cart.optJSONArray("items"),
+                    cart.optJSONArray("products"),
+                    cart.optJSONArray("positions"),
+                    cart.optJSONArray("lines")
+            );
+
+            double total = firstNumber(
+                    root,
+                    "total", "total_price", "totalPrice", "totalPriceValue",
+                    "amount", "final_sum", "total_sum"
+            );
+            if (Double.isNaN(total)) {
+                total = firstNumber(
+                        data,
+                        "total", "total_price", "totalPrice", "totalPriceValue",
+                        "amount", "final_sum", "total_sum"
+                );
+            }
+            if (Double.isNaN(total)) {
+                JSONObject summary = data.optJSONObject("full_summary");
+                if (summary != null) {
+                    total = firstNumber(
+                            summary,
+                            "total", "final_sum", "total_sum", "amount"
+                    );
+                }
+            }
+
+            int itemCount = items == null ? 0 : items.length();
+            appendLog(
+                    "Корзина прочитана. Позиций: " + itemCount
+                            + (Double.isNaN(total) ? "" : "; итог: " + total + " ₽")
+            );
+
+            if (items == null) {
+                return;
+            }
+
+            int shown = Math.min(items.length(), 20);
+            for (int i = 0; i < shown; i++) {
+                JSONObject line = items.optJSONObject(i);
+                if (line == null) {
+                    continue;
+                }
+                JSONObject product = line.optJSONObject("product");
+                if (product == null) {
+                    product = line;
+                }
+
+                String id = firstNonBlank(
+                        product.optString("plu", ""),
+                        product.optString("product_plu", ""),
+                        product.optString("product_id", ""),
+                        product.optString("sku", ""),
+                        product.optString("id", "?")
+                );
+                String title = firstNonBlank(
+                        product.optString("name", ""),
+                        product.optString("title", ""),
+                        "Без названия"
+                );
+
+                Object qty = line.opt("quantity");
+                if (qty == null || qty == JSONObject.NULL) {
+                    qty = line.opt("count");
+                }
+                if (qty == null || qty == JSONObject.NULL) {
+                    qty = line.opt("qty");
+                }
+                String quantity = qty == null || qty == JSONObject.NULL
+                        ? "1"
+                        : String.valueOf(qty);
+
+                appendLog("• [" + id + "] " + title + " × " + quantity);
+            }
+        } catch (JSONException error) {
+            appendLog("Не удалось разобрать корзину: " + error.getMessage());
+            appendLog("Ответ: " + body.substring(0, Math.min(body.length(), 300)));
+        }
+    }
+
+    private JSONArray firstArray(JSONArray... values) {
+        for (JSONArray value : values) {
+            if (value != null) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private double firstNumber(JSONObject object, String... keys) {
+        for (String key : keys) {
+            if (!object.has(key) || object.isNull(key)) {
+                continue;
+            }
+            Object value = object.opt(key);
+            if (value instanceof Number) {
+                return ((Number) value).doubleValue();
+            }
+            try {
+                return Double.parseDouble(String.valueOf(value).replace(",", "."));
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return Double.NaN;
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return "";
     }
 
     private String priceFrom(JSONObject prices) {
