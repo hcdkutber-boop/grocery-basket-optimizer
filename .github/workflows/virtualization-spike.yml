@@ -20,11 +20,10 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install NDK
-        run: sdkmanager "ndk;29.0.13846066"
+      - name: Prepare Android SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;29.0.13846066"
 
       - name: Clone pinned BlackBox
         run: |
