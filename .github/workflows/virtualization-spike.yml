@@ -76,15 +76,48 @@ jobs:
         working-directory: virtualization-engine
         run: ./gradlew :app:assembleDebug --stacktrace
 
+      - name: Re-sign APKs with project development certificate
+        run: |
+          mkdir -p signing signed
+          base64 -d android-spike/signing/dev-keystore.p12.b64 > signing/dev.p12
+          python3 - <<'PY' > signing/vars.sh
+          import re
+          text = open("android-spike/app/build.gradle", encoding="utf-8").read()
+          for gradle_name, shell_name in [
+              ("storePassword", "STORE_PASS"),
+              ("keyAlias", "KEY_ALIAS"),
+              ("keyPassword", "KEY_PASS"),
+          ]:
+              match = re.search(rf'{gradle_name}\\s+"([^"]+)"', text)
+              if not match:
+                  raise SystemExit(f"Missing {gradle_name}")
+              print(f"{shell_name}='{match.group(1)}'")
+          PY
+          . signing/vars.sh
+          APKSIGNER="$(find "$ANDROID_SDK_ROOT/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          for apk in virtualization-engine/app/build/outputs/apk/debug/*.apk; do
+            name="$(basename "$apk")"
+            "$APKSIGNER" sign \
+              --ks signing/dev.p12 \
+              --ks-type PKCS12 \
+              --ks-key-alias "$KEY_ALIAS" \
+              --ks-pass "pass:$STORE_PASS" \
+              --key-pass "pass:$KEY_PASS" \
+              --out "signed/$name" \
+              "$apk"
+            "$APKSIGNER" verify --verbose --print-certs "signed/$name"
+          done
+
       - name: Collect outputs
         run: |
           mkdir -p out
-          find virtualization-engine/app/build/outputs/apk -type f -name "*.apk" -exec cp {} out/ \;
+          cp signed/*.apk out/
           cp virtualization-engine/LICENSE out/BLACKS_BLACKBOX_LICENSE.txt
           printf '%s\n' \
             'Source: https://github.com/Black00Z/Blacks-BlackBox' \
             'Pinned commit: 40282a7bf4500948cfd598fc67e6e63114b26dd9' \
             'Purpose: compatibility test only; no X5 APK bundled.' \
+            'Signing: fixed Grocery Optimizer development certificate.' \
             > out/BUILD_INFO.txt
 
       - name: Upload APK
