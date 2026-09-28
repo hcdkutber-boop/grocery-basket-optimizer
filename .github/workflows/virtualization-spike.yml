@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - ".github/workflows/virtualization-spike.yml"
+      - "virtualization-spike/**"
   workflow_dispatch:
 
 jobs:
@@ -35,68 +36,8 @@ jobs:
       - name: Add X5 OAuth redirect relay
         run: |
           mkdir -p virtualization-engine/app/src/main/java/com/onebitmonochrome/blacksbbox/view/x5
-          cat > virtualization-engine/app/src/main/java/com/onebitmonochrome/blacksbbox/view/x5/X5RedirectActivity.kt <<'EOF'
-          package com.onebitmonochrome.blacksbbox.view.x5
-
-          import android.app.Activity
-          import android.content.Intent
-          import android.net.Uri
-          import android.os.Bundle
-          import android.util.Log
-          import top.niunaijun.blackbox.BlackBoxCore
-
-          class X5RedirectActivity : Activity() {
-              override fun onCreate(savedInstanceState: Bundle?) {
-                  super.onCreate(savedInstanceState)
-
-                  val uri: Uri = intent?.data ?: run {
-                      finish()
-                      return
-                  }
-
-                  val targetPackage = "ru.pyaterochka.app.browser"
-                  var forwarded = false
-
-                  try {
-                      for (user in BlackBoxCore.get().users) {
-                          if (!BlackBoxCore.get().isInstalled(targetPackage, user.id)) {
-                              continue
-                          }
-
-                          val forward = Intent(Intent.ACTION_VIEW, uri)
-                              .addCategory(Intent.CATEGORY_DEFAULT)
-                              .addCategory(Intent.CATEGORY_BROWSABLE)
-                              .setPackage(targetPackage)
-                              .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-
-                          Log.d("X5Redirect", "Forwarding X5 OAuth redirect to virtual userId=" + user.id)
-                          BlackBoxCore.get().startActivity(forward, user.id)
-                          forwarded = true
-                          break
-                      }
-
-                      if (!forwarded && BlackBoxCore.get().isInstalled(targetPackage, 0)) {
-                          val forward = Intent(Intent.ACTION_VIEW, uri)
-                              .addCategory(Intent.CATEGORY_DEFAULT)
-                              .addCategory(Intent.CATEGORY_BROWSABLE)
-                              .setPackage(targetPackage)
-                              .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                          Log.d("X5Redirect", "Forwarding X5 OAuth redirect to fallback virtual userId=0")
-                          BlackBoxCore.get().startActivity(forward, 0)
-                          forwarded = true
-                      }
-
-                      if (!forwarded) {
-                          Log.w("X5Redirect", "Virtual Pyaterochka package not found")
-                      }
-                  } catch (t: Throwable) {
-                      Log.w("X5Redirect", "Failed to forward X5 OAuth redirect", t)
-                  } finally {
-                      finish()
-                  }
-              }
-          }
-          EOF
+          cp virtualization-spike/X5RedirectActivity.kt \
+            virtualization-engine/app/src/main/java/com/onebitmonochrome/blacksbbox/view/x5/X5RedirectActivity.kt
 
           python3 - <<'PY'
           from pathlib import Path
@@ -206,6 +147,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: grocery-virtualization-spike-0.2
+          name: grocery-virtualization-spike-0.3
           path: out/*
           if-no-files-found: error
