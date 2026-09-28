@@ -88,7 +88,7 @@ jobs:
               ("keyAlias", "KEY_ALIAS"),
               ("keyPassword", "KEY_PASS"),
           ]:
-              match = re.search(rf'{gradle_name}\\s+"([^"]+)"', text)
+              match = re.search(rf'{gradle_name}\s+"([^"]+)"', text)
               if not match:
                   raise SystemExit(f"Missing {gradle_name}")
               print(f"{shell_name}='{match.group(1)}'")
