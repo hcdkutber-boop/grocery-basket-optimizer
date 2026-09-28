@@ -32,6 +32,100 @@ jobs:
           cd virtualization-engine
           git checkout 40282a7bf4500948cfd598fc67e6e63114b26dd9
 
+      - name: Add X5 OAuth redirect relay
+        run: |
+          mkdir -p virtualization-engine/app/src/main/java/com/onebitmonochrome/blacksbbox/view/x5
+          cat > virtualization-engine/app/src/main/java/com/onebitmonochrome/blacksbbox/view/x5/X5RedirectActivity.kt <<'EOF'
+          package com.onebitmonochrome.blacksbbox.view.x5
+
+          import android.app.Activity
+          import android.content.Intent
+          import android.net.Uri
+          import android.os.Bundle
+          import android.util.Log
+          import top.niunaijun.blackbox.BlackBoxCore
+
+          class X5RedirectActivity : Activity() {
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+
+                  val uri: Uri = intent?.data ?: run {
+                      finish()
+                      return
+                  }
+
+                  val targetPackage = "ru.pyaterochka.app.browser"
+                  var forwarded = false
+
+                  try {
+                      for (user in BlackBoxCore.get().users) {
+                          if (!BlackBoxCore.get().isInstalled(targetPackage, user.id)) {
+                              continue
+                          }
+
+                          val forward = Intent(Intent.ACTION_VIEW, uri)
+                              .addCategory(Intent.CATEGORY_DEFAULT)
+                              .addCategory(Intent.CATEGORY_BROWSABLE)
+                              .setPackage(targetPackage)
+                              .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+                          Log.d("X5Redirect", "Forwarding X5 OAuth redirect to virtual userId=" + user.id)
+                          BlackBoxCore.get().startActivity(forward, user.id)
+                          forwarded = true
+                          break
+                      }
+
+                      if (!forwarded && BlackBoxCore.get().isInstalled(targetPackage, 0)) {
+                          val forward = Intent(Intent.ACTION_VIEW, uri)
+                              .addCategory(Intent.CATEGORY_DEFAULT)
+                              .addCategory(Intent.CATEGORY_BROWSABLE)
+                              .setPackage(targetPackage)
+                              .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                          Log.d("X5Redirect", "Forwarding X5 OAuth redirect to fallback virtual userId=0")
+                          BlackBoxCore.get().startActivity(forward, 0)
+                          forwarded = true
+                      }
+
+                      if (!forwarded) {
+                          Log.w("X5Redirect", "Virtual Pyaterochka package not found")
+                      }
+                  } catch (t: Throwable) {
+                      Log.w("X5Redirect", "Failed to forward X5 OAuth redirect", t)
+                  } finally {
+                      finish()
+                  }
+              }
+          }
+          EOF
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("virtualization-engine/app/src/main/AndroidManifest.xml")
+          s = p.read_text()
+          marker = '        <activity android:name=".view.setting.SettingActivity" />'
+          relay = '''        <activity
+                      android:name=".view.x5.X5RedirectActivity"
+                      android:excludeFromRecents="true"
+                      android:exported="true"
+                      android:launchMode="singleTask"
+                      android:noHistory="true"
+                      android:theme="@android:style/Theme.NoDisplay">
+                      <intent-filter>
+                          <action android:name="android.intent.action.VIEW" />
+                          <category android:name="android.intent.category.DEFAULT" />
+                          <category android:name="android.intent.category.BROWSABLE" />
+                          <data
+                              android:host="redirect"
+                              android:scheme="ru.x5.asl" />
+                      </intent-filter>
+                  </activity>
+          '''
+          if marker not in s:
+              raise SystemExit("Manifest marker not found")
+          p.write_text(s.replace(marker, relay + marker))
+          PY
+
       - name: Prefer primary Maven repositories
         working-directory: virtualization-engine
         run: |
@@ -80,20 +174,9 @@ jobs:
         run: |
           mkdir -p signing signed
           base64 -d android-spike/signing/dev-keystore.p12.b64 > signing/dev.p12
-          python3 - <<'PY' > signing/vars.sh
-          import re
-          text = open("android-spike/app/build.gradle", encoding="utf-8").read()
-          for gradle_name, shell_name in [
-              ("storePassword", "STORE_PASS"),
-              ("keyAlias", "KEY_ALIAS"),
-              ("keyPassword", "KEY_PASS"),
-          ]:
-              match = re.search(rf'{gradle_name}\s+"([^"]+)"', text)
-              if not match:
-                  raise SystemExit(f"Missing {gradle_name}")
-              print(f"{shell_name}='{match.group(1)}'")
-          PY
-          . signing/vars.sh
+          STORE_PASS='grocery-spike-dev'
+          KEY_ALIAS='grocery-spike-dev'
+          KEY_PASS='grocery-spike-dev'
           APKSIGNER="$(find "$ANDROID_SDK_ROOT/build-tools" -type f -name apksigner | sort -V | tail -1)"
           for apk in virtualization-engine/app/build/outputs/apk/debug/*.apk; do
             name="$(basename "$apk")"
@@ -116,13 +199,13 @@ jobs:
           printf '%s\n' \
             'Source: https://github.com/Black00Z/Blacks-BlackBox' \
             'Pinned commit: 40282a7bf4500948cfd598fc67e6e63114b26dd9' \
-            'Purpose: compatibility test only; no X5 APK bundled.' \
+            'Purpose: X5 OAuth redirect compatibility test; no X5 APK bundled.' \
             'Signing: fixed Grocery Optimizer development certificate.' \
             > out/BUILD_INFO.txt
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: grocery-virtualization-spike-0.1
+          name: grocery-virtualization-spike-0.2
           path: out/*
           if-no-files-found: error
