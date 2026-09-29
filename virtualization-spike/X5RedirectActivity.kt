@@ -7,19 +7,58 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
-import android.widget.Toast
+import android.view.Gravity
+import android.view.ViewGroup
+import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.TextView
 import top.niunaijun.blackbox.BlackBoxCore
 
 class X5RedirectActivity : Activity() {
+    private var callbackUri: Uri? = null
+    private var targetUserId: Int? = null
+    private var targetComponent: ComponentName? = null
+    private lateinit var statusView: TextView
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        callbackUri = intent?.data
 
-        val uri: Uri = intent?.data ?: run {
-            finish()
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(32, 48, 32, 48)
+        }
+        statusView = TextView(this).apply { textSize = 18f }
+        root.addView(statusView, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        ))
+
+        val button = Button(this).apply {
+            text = "Передать в Пятёрочку"
+            setOnClickListener { forwardNow() }
+        }
+        root.addView(button, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        ))
+        setContentView(root)
+        inspect()
+    }
+
+    private fun inspect() {
+        val uri = callbackUri
+        if (uri == null) {
+            statusView.text = "X5 callback не получен"
             return
         }
 
-        var message = "X5 relay: обработчик не найден"
+        val lines = mutableListOf<String>()
+        lines += "X5 callback получен"
+        lines += "scheme=" + (uri.scheme ?: "")
+        lines += "host=" + (uri.host ?: "")
+
         try {
             val probe = Intent(Intent.ACTION_VIEW, uri)
                 .addCategory(Intent.CATEGORY_DEFAULT)
@@ -32,31 +71,50 @@ class X5RedirectActivity : Activity() {
                     null,
                     user.id
                 )
+                lines += "virtual user=" + user.id + ", handlers=" + candidates.size
 
-                val chosen = candidates.firstOrNull {
-                    it.activityInfo?.packageName == "ru.pyaterochka.app.browser"
-                } ?: candidates.firstOrNull()
-
-                val info = chosen?.activityInfo ?: continue
-                message = "X5 relay: user=" + user.id + " -> " + info.packageName + "/" + info.name
-
-                val forward = Intent(probe)
-                    .setComponent(ComponentName(info.packageName, info.name))
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                    .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
-
-                BlackBoxCore.getBActivityManager().startActivity(forward, user.id)
-                Toast.makeText(this, message, Toast.LENGTH_LONG).show()
-                finish()
-                return
+                for (candidate in candidates) {
+                    val info = candidate.activityInfo ?: continue
+                    lines += "• " + info.packageName + "/" + info.name
+                    if (targetComponent == null && info.packageName == "ru.pyaterochka.app.browser") {
+                        targetUserId = user.id
+                        targetComponent = ComponentName(info.packageName, info.name)
+                    }
+                }
             }
         } catch (t: Throwable) {
-            message = "X5 relay: " + t.javaClass.simpleName
-            Log.w("X5Redirect", "relay failed", t)
+            lines += "Ошибка поиска: " + t.javaClass.simpleName + ": " + (t.message ?: "")
+            Log.w("X5Redirect", "inspect failed", t)
         }
 
-        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
-        finish()
+        if (targetComponent == null) lines += "Обработчик Пятёрочки НЕ найден"
+        else lines += "Выбран: " + targetComponent!!.flattenToShortString()
+        statusView.text = lines.joinToString("\n")
+    }
+
+    private fun forwardNow() {
+        val uri = callbackUri ?: return
+        val userId = targetUserId
+        val component = targetComponent
+        if (userId == null || component == null) {
+            statusView.append("\nПередача невозможна: нет target Activity")
+            return
+        }
+
+        try {
+            val forward = Intent(Intent.ACTION_VIEW, uri)
+                .addCategory(Intent.CATEGORY_DEFAULT)
+                .addCategory(Intent.CATEGORY_BROWSABLE)
+                .setComponent(component)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+
+            BlackBoxCore.getBActivityManager().startActivity(forward, userId)
+            statusView.append("\nIntent передан. Если Пятёрочка не открылась — проблема уже внутри guest lifecycle/AppAuth.")
+        } catch (t: Throwable) {
+            statusView.append("\nОшибка передачи: " + t.javaClass.simpleName + ": " + (t.message ?: ""))
+            Log.w("X5Redirect", "forward failed", t)
+        }
     }
 }
