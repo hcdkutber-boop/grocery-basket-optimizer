@@ -49,9 +49,7 @@ jobs:
                       android:name=".view.x5.X5RedirectActivity"
                       android:excludeFromRecents="true"
                       android:exported="true"
-                      android:launchMode="singleTask"
-                      android:noHistory="true"
-                      android:theme="@android:style/Theme.NoDisplay">
+                      android:launchMode="singleTask">
                       <intent-filter>
                           <action android:name="android.intent.action.VIEW" />
                           <category android:name="android.intent.category.DEFAULT" />
@@ -147,6 +145,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: grocery-virtualization-spike-0.3
+          name: grocery-virtualization-spike-0.4
           path: out/*
           if-no-files-found: error
